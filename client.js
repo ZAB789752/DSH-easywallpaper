@@ -40,11 +40,11 @@ window.__ModuleLoader__.load({
         })
       }
 
-      function saveWallpaper(blob, fileName, veil, kind, typo, sound) {
+      function saveWallpaper(blob, fileName, veil, kind, typo, sound, vcrop) {
         return openDb().then(function (db) {
           return new Promise(function (resolve, reject) {
             var tx = db.transaction(DB_STORE, 'readwrite')
-            tx.objectStore(DB_STORE).put({ blob: blob, fileName: fileName, veil: veil, kind: kind || null, typo: typo || null, sound: sound !== false, savedAt: Date.now() }, DB_KEY)
+            tx.objectStore(DB_STORE).put({ blob: blob, fileName: fileName, veil: veil, kind: kind || null, typo: typo || null, sound: sound !== false, vcrop: vcrop || null, savedAt: Date.now() }, DB_KEY)
             tx.oncomplete = function () { resolve() }
             tx.onerror = function () { reject(tx.error) }
           })
@@ -78,6 +78,9 @@ window.__ModuleLoader__.load({
         veil: 60,
         styleTag: null,
         videoEl: null,
+        videoWrap: null,
+        videoCrop: null,
+        videoResizeHandler: null,
         captionTag: null,
         disposeTheme: null,
         blobUrl: null,
@@ -190,16 +193,49 @@ window.__ModuleLoader__.load({
 
       function applyVideo(url) {
         if (state.videoEl) removeVideo()
+        var wrap = document.createElement('div')
+        wrap.dataset.plugin = 'dsh-wallpaper'
+        wrap.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;overflow:hidden;z-index:-1;pointer-events:none;background:#000;'
         var v = document.createElement('video')
         v.dataset.plugin = 'dsh-wallpaper'
         v.muted = !state.sound
         v.loop = true
         v.playsInline = true
         v.src = url
-        v.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none;background:#000;'
-        document.body.append(v)
+        v.style.position = 'absolute'
+        wrap.append(v)
+        document.body.append(wrap)
+        state.videoWrap = wrap
         state.videoEl = v
+        var onMeta = function () {
+          v.removeEventListener('loadedmetadata', onMeta)
+          sizeVideo(v)
+        }
+        v.addEventListener('loadedmetadata', onMeta)
+        var onResize = function () { if (state.videoEl) sizeVideo(state.videoEl) }
+        state.videoResizeHandler = onResize
+        window.addEventListener('resize', onResize)
         tryPlayVideo(v)
+      }
+
+      function sizeVideo(v) {
+        var vw = v.videoWidth
+        var vh = v.videoHeight
+        if (!vw || !vh) return
+        var W = window.innerWidth
+        var H = window.innerHeight
+        var c = state.videoCrop
+        var sx = 0
+        var sy = 0
+        var sw = vw
+        var sh = vh
+        if (c) { sx = c.x; sy = c.y; sw = c.w; sh = c.h }
+        if (sw <= 0 || sh <= 0) return
+        var scale = Math.max(W / sw, H / sh)
+        v.style.width = Math.round(vw * scale) + 'px'
+        v.style.height = Math.round(vh * scale) + 'px'
+        v.style.left = Math.round(-sx * scale) + 'px'
+        v.style.top = Math.round(-sy * scale) + 'px'
       }
 
       function tryPlayVideo(v) {
@@ -221,7 +257,8 @@ window.__ModuleLoader__.load({
       function removeVideo() {
         if (!state.videoEl) return
         try { state.videoEl.pause() } catch (err) {}
-        state.videoEl.remove()
+        if (state.videoWrap) { state.videoWrap.remove(); state.videoWrap = null }
+        if (state.videoResizeHandler) { window.removeEventListener('resize', state.videoResizeHandler); state.videoResizeHandler = null }
         state.videoEl = null
       }
 
@@ -277,9 +314,10 @@ window.__ModuleLoader__.load({
         })
       }
 
-      function applyWallpaper(blob, fileName, veil, persist, kind, typo, sound) {
+      function applyWallpaper(blob, fileName, veil, persist, kind, typo, sound, vcrop) {
         if (veil != null) state.veil = veil
         if (sound !== undefined) state.sound = !!sound
+        if (vcrop !== undefined) state.videoCrop = vcrop
         applyTypo(typo)
         if (state.blobUrl) URL.revokeObjectURL(state.blobUrl)
         var url = URL.createObjectURL(blob)
@@ -307,7 +345,7 @@ window.__ModuleLoader__.load({
 
       function persistNow() {
         if (!state.currentBlob) return
-        void saveWallpaper(state.currentBlob, state.currentFileName, state.veil, state.currentKind, collectTypo(), state.sound).catch(function () {})
+        void saveWallpaper(state.currentBlob, state.currentFileName, state.veil, state.currentKind, collectTypo(), state.sound, state.videoCrop).catch(function () {})
       }
 
       function restoreWallpaper() {
@@ -319,7 +357,7 @@ window.__ModuleLoader__.load({
             bg: rec.bgColor || undefined,
             bgOpacity: rec.bgTransparent ? 0 : undefined,
           }
-          applyWallpaper(rec.blob, rec.fileName || '已保存的背景', rec.veil != null ? rec.veil : 60, false, rec.kind || undefined, typo, rec.sound === true)
+          applyWallpaper(rec.blob, rec.fileName || '已保存的背景', rec.veil != null ? rec.veil : 60, false, rec.kind || undefined, typo, rec.sound === true, rec.vcrop || undefined)
         }).catch(function () {})
       }
 
@@ -342,6 +380,7 @@ window.__ModuleLoader__.load({
         state.currentBlob = null
         state.currentFileName = null
         state.currentKind = null
+        state.videoCrop = null
         removeCaptionTag()
         if (state.disposeTheme) { state.disposeTheme(); state.disposeTheme = null }
         if (state.blobUrl) { URL.revokeObjectURL(state.blobUrl); state.blobUrl = null }
@@ -367,6 +406,7 @@ window.__ModuleLoader__.load({
       function CropOverlay(props) {
         var imageUrl = props.imageUrl
         var mime = props.mime
+        var mediaKind = props.mediaKind
         var pageRatio = props.pageRatio
         var onCancel = props.onCancel
         var onApply = props.onApply
@@ -385,6 +425,24 @@ window.__ModuleLoader__.load({
         var setBusy = busyState[1]
 
         react.useEffect(function () {
+          if (mediaKind === 'video') {
+            var v = document.createElement('video')
+            v.muted = true
+            v.playsInline = true
+            v.src = imageUrl
+            var onMeta = function () {
+              var w = v.videoWidth
+              var h = v.videoHeight
+              if (!w || !h) return
+              var cw, ch
+              if (w / h > pageRatio) { ch = h; cw = h * pageRatio } else { cw = w; ch = w / pageRatio }
+              setImgSize({ w: w, h: h })
+              setCrop({ x: (w - cw) / 2, y: (h - ch) / 2, w: cw, h: ch })
+            }
+            v.addEventListener('loadedmetadata', onMeta)
+            imgElRef.current = v
+            return function () { v.removeEventListener('loadedmetadata', onMeta); try { v.pause() } catch (err) {} }
+          }
           var img = new Image()
           img.onload = function () {
             var w = img.naturalWidth
@@ -397,7 +455,7 @@ window.__ModuleLoader__.load({
           img.src = imageUrl
           imgElRef.current = img
           return function () { img.onload = null }
-        }, [imageUrl, pageRatio])
+        }, [imageUrl, pageRatio, mediaKind])
 
         function onPointerDown(e) {
           if (!crop || busy) return
@@ -441,7 +499,12 @@ window.__ModuleLoader__.load({
         function onPointerEnd() { dragRef.current = null }
 
         function onApplyCrop() {
-          if (!crop || !imgElRef.current || busy) return
+          if (!crop || busy) return
+          if (mediaKind === 'video') {
+            onApply({ x: crop.x, y: crop.y, w: crop.w, h: crop.h })
+            return
+          }
+          if (!imgElRef.current) return
           setBusy(true)
           var img = imgElRef.current
           var canvas = document.createElement('canvas')
@@ -499,12 +562,14 @@ window.__ModuleLoader__.load({
             onPointerUp: onPointerEnd,
             onPointerLeave: onPointerEnd,
           },
-            react.createElement('img', {
-              ref: imgElRef,
-              src: imageUrl,
-              alt: '裁剪预览',
-              style: { display: 'block', maxWidth: '100%', maxHeight: 320, width: 'auto', height: 'auto', borderRadius: 6 },
-            }),
+            mediaKind === 'video'
+              ? react.createElement('video', { ref: imgElRef, src: imageUrl, muted: true, loop: true, autoPlay: true, playsInline: true, style: { display: 'block', maxWidth: '100%', maxHeight: 320, width: 'auto', height: 'auto', borderRadius: 6 } })
+              : react.createElement('img', {
+                  ref: imgElRef,
+                  src: imageUrl,
+                  alt: '裁剪预览',
+                  style: { display: 'block', maxWidth: '100%', maxHeight: 320, width: 'auto', height: 'auto', borderRadius: 6 },
+                }),
             crop && imgSize ? react.createElement('div', { style: overlayStyle },
               react.createElement('div', { style: boxStyle, 'data-mode': 'move' },
                 react.createElement('span', { 'data-mode': 'nw', style: handleStyle('nw') }),
@@ -569,6 +634,9 @@ window.__ModuleLoader__.load({
         var soundOnState = useState(state.sound)
         var soundOn = soundOnState[0]
         var setSoundOn = soundOnState[1]
+        var cropKindState = useState('image')
+        var cropKind = cropKindState[0]
+        var setCropKind = cropKindState[1]
 
         useEffect(function () {
           var alive = true
@@ -596,7 +664,7 @@ window.__ModuleLoader__.load({
             return
           }
           var isVideo = file.type.indexOf('video/') === 0
-          var url = applyWallpaper(file, file.name, veil, true, isVideo ? 'video' : 'image')
+          var url = applyWallpaper(file, file.name, veil, true, isVideo ? 'video' : 'image', undefined, undefined, isVideo ? null : undefined)
           setImageUrl(url)
           setFileName(file.name)
           setMediaKind(isVideo ? 'video' : 'image')
@@ -636,6 +704,7 @@ window.__ModuleLoader__.load({
           var url = URL.createObjectURL(state.currentBlob)
           setCropSrcUrl(url)
           setCropMime(state.currentBlob.type === 'image/png' ? 'image/png' : 'image/jpeg')
+          setCropKind(mediaKind)
           setCropMode(true)
         }
 
@@ -654,6 +723,16 @@ window.__ModuleLoader__.load({
           setFileName((fileName || '背景图') + '（已裁剪）')
           setMediaKind('image')
           setMessage('已应用裁剪结果并保存，刷新/重启后自动恢复。')
+        }
+
+        function onCropApplyV(rect) {
+          if (cropSrcUrl) URL.revokeObjectURL(cropSrcUrl)
+          setCropSrcUrl(null)
+          setCropMode(false)
+          state.videoCrop = rect
+          applyWallpaper(state.currentBlob, (fileName || '已裁剪的视频') + '（已裁剪）', veil, true, 'video', undefined, undefined, rect)
+          setFileName((fileName || '背景视频') + '（已裁剪）')
+          setMessage('已应用视频裁剪并保存，刷新/重启后自动恢复。')
         }
 
         var containerStyle = {
@@ -680,7 +759,7 @@ window.__ModuleLoader__.load({
                   imageUrl ? '更换背景' : '上传背景'
                 )
               : null,
-            !cropMode && imageUrl && mediaKind === 'image'
+            !cropMode && imageUrl
               ? createElement('button', { onClick: onCropStart, style: buttonStyleRef() }, '裁剪')
               : null,
             !cropMode && imageUrl
@@ -691,9 +770,10 @@ window.__ModuleLoader__.load({
             ? createElement(CropOverlay, {
                 imageUrl: cropSrcUrl,
                 mime: cropMime,
+                mediaKind: cropKind,
                 pageRatio: window.innerWidth / window.innerHeight,
                 onCancel: onCropCancel,
-                onApply: onCropApply,
+                onApply: cropKind === 'video' ? onCropApplyV : onCropApply,
               })
             : imageUrl
               ? createElement('div', { style: rowStyle },
@@ -719,7 +799,7 @@ window.__ModuleLoader__.load({
                 )
               : null,
           createElement('div', { style: Object.assign({}, secondary, { lineHeight: 1.5 }) }, message),
-          createElement('div', { style: tertiary }, '支持图片与视频背景（视频默认静音、勾选「声音」开启，图片可裁剪）；文字样式（字体/字号/间距/描边/颜色等）请在「背景文字」分区调整；全部设置保存在本机浏览器，刷新/重启自动恢复。')
+          createElement('div', { style: tertiary }, '支持图片与视频背景（视频默认静音、勾选「声音」开启；图片与视频均可裁剪，视频为画面区域裁剪）；文字样式（字体/字号/间距/描边/颜色等）请在「背景文字」分区调整；全部设置保存在本机浏览器，刷新/重启自动恢复。')
         )
       }
 
