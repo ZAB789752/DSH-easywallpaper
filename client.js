@@ -91,7 +91,7 @@ window.__ModuleLoader__.load({
         strokeColor: null,
         strokeWidth: null,
         strokeOpacity: null,
-        sound: true,
+        sound: false,
       }
 
       function hexToRgb(hex) {
@@ -319,7 +319,7 @@ window.__ModuleLoader__.load({
             bg: rec.bgColor || undefined,
             bgOpacity: rec.bgTransparent ? 0 : undefined,
           }
-          applyWallpaper(rec.blob, rec.fileName || '已保存的背景', rec.veil != null ? rec.veil : 60, false, rec.kind || undefined, typo, rec.sound !== false)
+          applyWallpaper(rec.blob, rec.fileName || '已保存的背景', rec.veil != null ? rec.veil : 60, false, rec.kind || undefined, typo, rec.sound === true)
         }).catch(function () {})
       }
 
@@ -719,7 +719,7 @@ window.__ModuleLoader__.load({
                 )
               : null,
           createElement('div', { style: Object.assign({}, secondary, { lineHeight: 1.5 }) }, message),
-          createElement('div', { style: tertiary }, '支持图片与视频背景（视频静音循环、图片可裁剪）；文字样式（字体/字号/间距/描边/颜色等）请在「背景文字」分区调整；全部设置保存在本机浏览器，刷新/重启自动恢复。')
+          createElement('div', { style: tertiary }, '支持图片与视频背景（视频默认静音、勾选「声音」开启，图片可裁剪）；文字样式（字体/字号/间距/描边/颜色等）请在「背景文字」分区调整；全部设置保存在本机浏览器，刷新/重启自动恢复。')
         )
       }
 
