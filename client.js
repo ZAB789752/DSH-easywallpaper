@@ -40,11 +40,11 @@ window.__ModuleLoader__.load({
         })
       }
 
-      function saveWallpaper(blob, fileName, veil, kind, typo) {
+      function saveWallpaper(blob, fileName, veil, kind, typo, sound) {
         return openDb().then(function (db) {
           return new Promise(function (resolve, reject) {
             var tx = db.transaction(DB_STORE, 'readwrite')
-            tx.objectStore(DB_STORE).put({ blob: blob, fileName: fileName, veil: veil, kind: kind || null, typo: typo || null, savedAt: Date.now() }, DB_KEY)
+            tx.objectStore(DB_STORE).put({ blob: blob, fileName: fileName, veil: veil, kind: kind || null, typo: typo || null, sound: sound !== false, savedAt: Date.now() }, DB_KEY)
             tx.oncomplete = function () { resolve() }
             tx.onerror = function () { reject(tx.error) }
           })
@@ -91,6 +91,7 @@ window.__ModuleLoader__.load({
         strokeColor: null,
         strokeWidth: null,
         strokeOpacity: null,
+        sound: true,
       }
 
       function hexToRgb(hex) {
@@ -191,15 +192,30 @@ window.__ModuleLoader__.load({
         if (state.videoEl) removeVideo()
         var v = document.createElement('video')
         v.dataset.plugin = 'dsh-wallpaper'
-        v.muted = true
+        v.muted = !state.sound
         v.loop = true
         v.playsInline = true
         v.src = url
         v.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none;background:#000;'
         document.body.append(v)
         state.videoEl = v
+        tryPlayVideo(v)
+      }
+
+      function tryPlayVideo(v) {
         var p = v.play()
-        if (p && typeof p.then === 'function') p.then(function () {}).catch(function () {})
+        if (p && typeof p.then === 'function') {
+          p.then(function () {}).catch(function () {
+            if (!v.muted) {
+              var once = function () {
+                document.removeEventListener('click', once)
+                var q = v.play()
+                if (q && typeof q.then === 'function') q.then(function () {}).catch(function () {})
+              }
+              document.addEventListener('click', once)
+            }
+          })
+        }
       }
 
       function removeVideo() {
@@ -261,8 +277,9 @@ window.__ModuleLoader__.load({
         })
       }
 
-      function applyWallpaper(blob, fileName, veil, persist, kind, typo) {
+      function applyWallpaper(blob, fileName, veil, persist, kind, typo, sound) {
         if (veil != null) state.veil = veil
+        if (sound !== undefined) state.sound = !!sound
         applyTypo(typo)
         if (state.blobUrl) URL.revokeObjectURL(state.blobUrl)
         var url = URL.createObjectURL(blob)
@@ -290,7 +307,7 @@ window.__ModuleLoader__.load({
 
       function persistNow() {
         if (!state.currentBlob) return
-        void saveWallpaper(state.currentBlob, state.currentFileName, state.veil, state.currentKind, collectTypo()).catch(function () {})
+        void saveWallpaper(state.currentBlob, state.currentFileName, state.veil, state.currentKind, collectTypo(), state.sound).catch(function () {})
       }
 
       function restoreWallpaper() {
@@ -302,7 +319,7 @@ window.__ModuleLoader__.load({
             bg: rec.bgColor || undefined,
             bgOpacity: rec.bgTransparent ? 0 : undefined,
           }
-          applyWallpaper(rec.blob, rec.fileName || '已保存的背景', rec.veil != null ? rec.veil : 60, false, rec.kind || undefined, typo)
+          applyWallpaper(rec.blob, rec.fileName || '已保存的背景', rec.veil != null ? rec.veil : 60, false, rec.kind || undefined, typo, rec.sound !== false)
         }).catch(function () {})
       }
 
@@ -549,6 +566,9 @@ window.__ModuleLoader__.load({
         var mediaKindState = useState('image')
         var mediaKind = mediaKindState[0]
         var setMediaKind = mediaKindState[1]
+        var soundOnState = useState(state.sound)
+        var soundOn = soundOnState[0]
+        var setSoundOn = soundOnState[1]
 
         useEffect(function () {
           var alive = true
@@ -561,6 +581,7 @@ window.__ModuleLoader__.load({
               setFileName(rec.fileName || '已保存的背景')
               setVeil(rec.veil != null ? rec.veil : 60)
               if (rec.kind === 'video' || (rec.blob.type && rec.blob.type.indexOf('video/') === 0)) setMediaKind('video')
+              setSoundOn(rec.sound !== false)
               setMessage('已恢复上次保存的背景（保存在本机浏览器中）')
             }
           }).catch(function () {})
@@ -587,6 +608,17 @@ window.__ModuleLoader__.load({
           setVeil(v)
           state.veil = v
           applyVeil(v)
+          persistNow()
+        }
+
+        function onSoundChange(e) {
+          var on = e.target.checked
+          setSoundOn(on)
+          state.sound = on
+          if (state.videoEl) {
+            state.videoEl.muted = !on
+            if (on) tryPlayVideo(state.videoEl)
+          }
           persistNow()
         }
 
@@ -674,7 +706,15 @@ window.__ModuleLoader__.load({
                       createElement('span', { style: secondary }, '遮罩'),
                       createElement('input', { type: 'range', min: '0', max: '100', step: '1', value: String(veil), onChange: onVeilChange, style: { flex: 1, minWidth: 80 } }),
                       createElement('span', { style: Object.assign({}, secondary, { width: 34, textAlign: 'right' }) }, veil + '%')
-                    )
+                    ),
+                    mediaKind === 'video'
+                      ? createElement('div', { style: rowStyle },
+                          createElement('label', { style: Object.assign({}, secondary, { display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }) },
+                            createElement('input', { type: 'checkbox', checked: soundOn, onChange: onSoundChange }),
+                            '声音'
+                          )
+                        )
+                      : null
                   )
                 )
               : null,
