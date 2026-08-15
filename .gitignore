@@ -1,0 +1,17 @@
+# dependencies / build
+node_modules/
+*.log
+dist/
+lib/
+
+# deployment / user data — 不要推送这些
+.dsh/
+profiles/
+sessions/
+storages/
+*.credentials.yaml
+.anonymous-user-id
+
+# OS
+.DS_Store
+Thumbs.db

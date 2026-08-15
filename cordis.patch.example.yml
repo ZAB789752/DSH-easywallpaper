@@ -1,0 +1,5 @@
+# dsh-wallpaper: 上传图片作为页面背景（持久客户端插件，浏览器启动即加载）。
+# 把这个 insert 段追加到 <部署>\.dsh\profiles\web\cordis.patch.yml 末尾。
+- insert:
+    - id: dsh-wallpaper
+      name: dsh-wallpaper
