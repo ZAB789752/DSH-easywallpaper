@@ -73,3 +73,4 @@ node verify-wallpaper.mjs
 ## License
 
 MIT（见 `LICENSE`）。方正字体为商业字体，仓库仅按字体名引用，未打包字体文件。
+本项目持续更新中
